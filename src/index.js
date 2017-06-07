@@ -4,63 +4,81 @@ import {normalizeOptions} from './normalizeOptions'
 import {shouldInclude} from './shouldInclude'
 
 function diffProps (prev, next, displayName) {
-  return deepDiff(prev, next, `${displayName}.props`, [])
-}
-
-function diffState (prev, next , displayName) {
   if (prev && next) {
-    return deepDiff(pre, next, `${displayName}.state`, [])
+    return deepDiff(prev, next, `${displayName}.props`, [])
   }
 
   return []
 }
 
-function createComponentDidUpdate (opts) {
-  return function componentDidUpdate (prevProps, prevState) {
-    const displayName = getDisplayName(this)
+function diffState (prev, next , displayName) {
+  if (prev && next) {
+    return deepDiff(prev, next, `${displayName}.state`, [])
+  }
+
+  return []
+}
+
+function createShouldUpdate (opts) {
+  return function shouldUpdate (state, props) {
+    delete this.__WHY_DID_YOU_UPDATE_NOTIFIER__
+
+    const displayName = this.constructor.name
 
     if (!shouldInclude(displayName, opts)) {
       return
     }
 
-    const diffs =
-      diffProps(prevProps, this.props, displayName)
-        .concat(diffState(prevState, this.state, displayName))
+    if (props) {
+      let {children, ...sanitizedProps} = props
 
-    diffs.forEach(opts.notifier)
+      props = sanitizedProps
+    }
+
+    var nextProps
+    var prevProps
+
+    for (var propName in props) {
+      nextProps = nextProps || {}
+      prevProps = prevProps || {}
+      nextProps[propName] = props[propName].newVal;
+      prevProps[propName] = props[propName].prevVal;
+    }
+
+    var nextState
+    var prevState
+
+    for (var stateName in state) {
+      nextState = nextState || {}
+      prevState = prevState || {}
+      nextState[propName] = state[stateName].newVal;
+      prevState[propName] = state[stateName].prevVal;
+    }
+
+    const diffs =
+      diffProps(prevProps, nextProps, displayName)
+        .concat(diffState(prevState, nextState, displayName))
+
+    this.__WHY_DID_YOU_UPDATE_NOTIFIER__ = () => diffs.forEach(opts.notifier)
+
+    return !!state || !!props;
   }
 }
 
-export const whyDidYouUpdate = (React, opts = {}) => {
-  const _componentDidUpdate = React.Component.prototype.componentDidUpdate
-  const _createClass = React.createClass
+export const whyDidYouUpdate = (JSXComponent, opts = {}) => {
   opts = normalizeOptions(opts)
 
-  React.Component.prototype.componentDidUpdate = createComponentDidUpdate(opts)
+  const _shouldUpdate = JSXComponent.prototype.shouldUpdate
 
-  if (_createClass) {
-    React.createClass = function createClass (obj) {
-      if (!obj.mixins) {
-        obj.mixins = []
-      }
+  JSXComponent.prototype.shouldUpdate = createShouldUpdate(opts)
 
-      const Mixin = {
-        componentDidUpdate: createComponentDidUpdate(opts)
-      }
-
-      obj.mixins = [Mixin].concat(obj.mixins)
-
-      return _createClass.call(React, obj)
+  JSXComponent.prototype.rendered = function rendered () {
+    if (this.__WHY_DID_YOU_UPDATE_NOTIFIER__) {
+      this.__WHY_DID_YOU_UPDATE_NOTIFIER__()
     }
   }
 
-  React.__WHY_DID_YOU_UPDATE_RESTORE_FN__ = () => {
-    React.Component.prototype.componentDidUpdate = _componentDidUpdate
-    React.createClass = _createClass
-    delete React.__WHY_DID_YOU_UPDATE_RESTORE_FN__
-  }
-
-  return React
+  return JSXComponent
 }
 
 export default whyDidYouUpdate
